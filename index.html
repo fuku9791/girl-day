@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <title>3人用 生理日記録・予測</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- Tailwind（CDN版） -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- PWA manifest（data URLで内蔵） -->
+    <link id="app-manifest" rel="manifest" href="" />
+    <meta name="theme-color" content="#ec4899" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <!-- Apple touch icon（簡易SVGデータアイコン / 後で差し替え推奨） -->
+    <link rel="apple-touch-icon" href="" id="apple-icon"/>
+
+    <style>
+      /* iOSのスクロール等で見た目安定化（任意） */
+      html, body, #root { height: 100%; }
+    </style>
+  </head>
+  <body class="bg-pink-50">
+    <div id="root"></div>
+
+    <script type="module">
+      // ========= 依存（React ESM）=========
+      import React from "https://esm.sh/react@18";
+      import { createRoot } from "https://esm.sh/react-dom@18/client";
+
+      // ========= ここから App（v0.6統合） =========
+      const { useEffect, useMemo, useRef, useState } = React;
+
+      const fmt = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      const toISO = (d) => fmt(d).toISOString().slice(0, 10);
+      const fromISO = (s) => { const [y,m,d] = s.split("-").map(Number); return new Date(y, m-1, d); };
+      const todayISO = () => toISO(new Date());
+      const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+      function daysBetween(aISO, bISO){ const a=fmt(fromISO(aISO)), b=fmt(fromISO(bISO)); return Math.round((b-a)/(1000*60*60*24)); }
+      function addDays(iso, n){ const d=fromISO(iso); d.setDate(d.getDate()+n); return toISO(d); }
+      function monthMatrix(baseDate){
+        const first = new Date(baseDate.getFullYear(), baseDate.getMonth(), 1);
+        const start = new Date(first);
+        const dow = start.getDay();
+        start.setDate(start.getDate()-dow);
+        const weeks=[];
+        for(let w=0; w<6; w++){
+          const row=[];
+          for(let d=0; d<7; d++){ row.push(new Date(start)); start.setDate(start.getDate()+1); }
+          weeks.push(row);
+        }
+        return weeks;
+      }
+      function calcCycleAvgWeighted(starts){
+        if(!starts || starts.length<2) return 28;
+        const deltas=[]; for(let i=1;i<starts.length;i++){ deltas.push(daysBetween(starts[i-1], starts[i])); }
+        if(deltas.length===1) return clamp(Math.round(deltas[0]),20,45);
+        if(deltas.length===2) return clamp(Math.round((deltas[0]+deltas[1])/2),20,45);
+        const last3=deltas.slice(-3); const weights=[1,2,3];
+        const num=last3.reduce((s,v,i)=>s+v*weights[i],0); const den=weights.reduce((s,v)=>s+v,0);
+        return clamp(Math.round(num/den),20,45);
+      }
+      function calcAvgBleedDays(periods){
+        const spans = (periods||[])
+          .filter(p=>p.start && p.end)
+          .map(p=>daysBetween(p.start,p.end)+1)
+          .filter(d=>d>0 && d<14);
+        if(!spans.length) return 5;
+        return clamp(Math.round(spans.reduce((s,v)=>s+v,0)/spans.length),2,10);
+      }
+      const DEFAULT_PROFILES = [
+        { id:"p1", name:"Aさん", color:"#f472b6", notify:{on:false, hh:8, mm:30}, logs:{periods:[], symptoms:{}} },
+        { id:"p2", name:"Bさん", color:"#fb7185", notify:{on:false, hh:8, mm:30}, logs:{periods:[], symptoms:{}} },
+        { id:"p3", name:"Cさん", color:"#f59e0b", notify:{on:false, hh:8, mm:30}, logs:{periods:[], symptoms:{}} },
+      ];
+      const FLAGS = ["腹痛","頭痛","だるさ","イライラ","敏感","眠い"];
+
+      function Card({children}){ return <div className="rounded-2xl border bg-white p-4 shadow-sm text-center text-pink-600">{children}</div>; }
+      function Empty({children}){ return <div className="rounded-2xl border border-dashed bg-pink-50 p-4 text-center text-pink-400">{children}</div>; }
+
+      function App(){
+        const [profiles, setProfiles] = useState(DEFAULT_PROFILES);
+        const [active, setActive] = useState(0);
+        const [calBase, setCalBase] = useState(fmt(new Date()));
+        const lastNotifyKeyRef = useRef("");
+
+        useEffect(()=>{
+          const raw = localStorage.getItem("period3_profiles_v5");
+          if(raw){ try{ const parsed=JSON.parse(raw); if(Array.isArray(parsed)&&parsed.length===3) setProfiles(parsed);}catch{} }
+          lastNotifyKeyRef.current = localStorage.getItem("period3_last_notify_key") || "";
+        },[]);
+        useEffect(()=>{ localStorage.setItem("period3_profiles_v5", JSON.stringify(profiles)); }, [profiles]);
+
+        const p = profiles[active];
+        const starts = useMemo(()=>[...p.logs.periods].map(x=>x.start).sort(), [p.logs.periods]);
+        const cycleAvg = useMemo(()=>calcCycleAvgWeighted(starts), [starts]);
+        const bleedAvg = useMemo(()=>calcAvgBleedDays(p.logs.periods), [p.logs.periods]);
+        const lastStart = starts.length ? starts[starts.length-1] : null;
+        const nextStartPred = lastStart ? addDays(lastStart, cycleAvg) : addDays(todayISO(), 28);
+        const daysLeft = daysBetween(todayISO(), nextStartPred);
+        const predEnd = addDays(nextStartPred, bleedAvg-1);
+        const currentOpen = p.logs.periods.find(pr=>pr.start && !pr.end);
+
+        const handleStart = ()=>{ if(currentOpen) return; updateProfile(active, d=>{ d.logs.periods=[...d.logs.periods,{start:todayISO()}]; }); };
+        const handleEnd = ()=>{ if(!currentOpen) return; updateProfile(active, d=>{ d.logs.periods=d.logs.periods.map(pr=>pr.start===currentOpen.start?{...pr,end:todayISO()}:pr); }); };
+
+        const day = todayISO();
+        const daySym = p.logs.symptoms[day] || { flags:[], note:"", temp:"" };
+        const toggleFlag = (f)=>{ const exists=daySym.flags.includes(f);
+          const flags = exists ? daySym.flags.filter(x=>x!==f) : [...daySym.flags, f];
+          updateProfile(active, d=>{ d.logs.symptoms={...d.logs.symptoms, [day]:{...daySym, flags}}; });
+        };
+        const setNote = (v)=> updateProfile(active, d=>{ d.logs.symptoms={...d.logs.symptoms, [day]:{...daySym, note:v}}; });
+        const setTemp = (v)=> updateProfile(active, d=>{ d.logs.symptoms={...d.logs.symptoms, [day]:{...daySym, temp:v}}; });
+
+        function updateProfile(index, fn){
+          setProfiles(prev=>{
+            const copy = JSON.parse(JSON.stringify(prev));
+            fn(copy[index]);
+            return copy;
+          });
+        }
+        const setName = (idx, name)=> updateProfile(idx, d=> d.name=name );
+        const setNotifyTime = (idx, hh, mm)=> updateProfile(idx, d=>{ d.notify.hh=hh; d.notify.mm=mm; });
+        const setNotifyOn = (idx, on)=> updateProfile(idx, d=> d.notify.on=on );
+
+        const recent = [...p.logs.periods].sort((a,b)=>a.start.localeCompare(b.start)).slice(-6).reverse();
+
+        useEffect(()=>{
+          const id=setInterval(()=>{
+            const now=new Date();
+            const key=`${todayISO()}@${now.getHours()}:${now.getMinutes()}`;
+            if(lastNotifyKeyRef.current===key) return;
+            profiles.forEach(prof=>{
+              if(!prof.notify?.on) return;
+              if(prof.notify.hh===now.getHours() && prof.notify.mm===now.getMinutes()){
+                const s=[...(prof.logs.periods||[])].map(x=>x.start).sort();
+                const cyc=calcCycleAvgWeighted(s);
+                const lastS=s.length?s[s.length-1]:null;
+                const nextS= lastS ? addDays(lastS,cyc) : addDays(todayISO(),28);
+                const left=daysBetween(todayISO(), nextS);
+                try{
+                  if(typeof Notification!=="undefined"){
+                    const send=()=> new Notification(`${prof.name}: 予定日まであと${left}日`, { body:`次回予測: ${nextS}` });
+                    if(Notification.permission==="granted") send();
+                    else if(Notification.permission!=="denied"){
+                      Notification.requestPermission().then(perm=>{ if(perm==="granted") send(); });
+                    }
+                  }
+                }catch{}
+              }
+            });
+            lastNotifyKeyRef.current=key;
+            localStorage.setItem("period3_last_notify_key", key);
+          }, 60000);
+          return ()=>clearInterval(id);
+        },[profiles]);
+
+        const weeks = monthMatrix(calBase);
+        function hexToRgb(hex){ const h=hex.replace("#",""); const n=parseInt(h,16); return `${(n>>16)&255}, ${(n>>8)&255}, ${n&255}`; }
+        function cellBackground(iso){
+          const layers=[];
+          profiles.forEach(prof=>{
+            (prof.logs.periods||[]).forEach(pr=>{
+              if(iso>=pr.start && pr.end && iso<=pr.end) layers.push({color:prof.color, alpha:0.45});
+              else if(iso===pr.start && !pr.end) layers.push({color:prof.color, alpha:0.45});
+            });
+            const s=[...(prof.logs.periods||[])].map(x=>x.start).sort();
+            const cyc=calcCycleAvgWeighted(s);
+            const lastS=s.length?s[s.length-1]:null;
+            const nx= lastS ? addDays(lastS,cyc) : null;
+            const bleed=calcAvgBleedDays(prof.logs.periods);
+            if(nx){ const nxEnd=addDays(nx, bleed-1); if(iso>=nx && iso<=nxEnd){ layers.push({color:prof.color, alpha:0.2}); } }
+          });
+          if(!layers.length) return undefined;
+          if(layers.length===1) return `rgba(${hexToRgb(layers[0].color)}, ${layers[0].alpha})`;
+          const stripes = layers.map((l,i)=>`repeating-linear-gradient(${45+i*15}deg, rgba(${hexToRgb(l.color)}, ${l.alpha}) 0 6px, transparent 6px 12px)`).join(",");
+          return stripes;
+        }
+
+        function download(filename, text){
+          const blob=new Blob([text], {type:"text/plain;charset=utf-8"});
+          const url=URL.createObjectURL(blob);
+          const a=document.createElement("a");
+          a.href=url; a.download=filename; a.click();
+          URL.revokeObjectURL(url);
+        }
+        function exportJSON(){
+          const raw =
+            localStorage.getItem("period3_profiles_v5") ||
+            localStorage.getItem("period3_profiles_v4") ||
+            localStorage.getItem("period3_profiles_v3") ||
+            localStorage.getItem("period3_profiles_v2") ||
+            localStorage.getItem("period3_profiles_v1");
+          const data = raw ? JSON.parse(raw) : null;
+          const payload={ version:"v0.6", exportedAt:new Date().toISOString(), profiles:data };
+          download(`period3_backup_${toISO(new Date())}.json`, JSON.stringify(payload, null, 2));
+        }
+        function exportCSV(){
+          const raw =
+            localStorage.getItem("period3_profiles_v5") ||
+            localStorage.getItem("period3_profiles_v4") ||
+            localStorage.getItem("period3_profiles_v3") ||
+            localStorage.getItem("period3_profiles_v2") ||
+            localStorage.getItem("period3_profiles_v1");
+          const data = raw ? JSON.parse(raw) : [];
+          const rows = [["user_id","name","type","date","start","end","flags","temp","note"]];
+          (data||[]).forEach(p=>{
+            (p.logs.periods||[]).forEach(pr=>{
+              rows.push([p.id,p.name,"period","",pr.start||"",pr.end||"","","",""]);
+            });
+            Object.entries(p.logs.symptoms||{}).forEach(([date,sym])=>{
+              rows.push([p.id,p.name,"symptom",date,"","",(sym.flags||[]).join("|"), sym.temp||"", String(sym.note||"").replace(/\n/g," ")]);
+            });
+          });
+          const csv = rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
+          download(`period3_export_${toISO(new Date())}.csv`, csv);
+        }
+        function importJSON(e){
+          const file=e.target.files && e.target.files[0]; if(!file) return;
+          const reader=new FileReader();
+          reader.onload=()=>{
+            try{
+              const obj=JSON.parse(String(reader.result||"{}"));
+              if(Array.isArray(obj)) localStorage.setItem("period3_profiles_v5", JSON.stringify(obj));
+              else if(obj && Array.isArray(obj.profiles)) localStorage.setItem("period3_profiles_v5", JSON.stringify(obj.profiles));
+              else { alert("JSONの形式が違います"); return; }
+              window.location.reload();
+            }catch{ alert("読み込みに失敗しました"); }
+          };
+          reader.readAsText(file);
+        }
+
+        return (
+          <div className="min-h-screen bg-pink-50 text-slate-900 p-4 font-sans">
+            <div className="max-w-3xl mx-auto">
+              <header className="mb-4 text-center">
+                <h1 className="text-3xl font-extrabold text-pink-600">🌸 3人用 生理日記録・予測 🌸</h1>
+                <p className="text-xs text-pink-400">ピンク系カレンダー / 3人色分け / 個別通知 / 「あと◯日」</p>
+              </header>
+
+              {/* 切替 */}
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {profiles.map((prof,i)=>(
+                  <button key={prof.id} onClick={()=>setActive(i)} style={{borderColor:prof.color, color:prof.color}}
+                    className={`rounded-full border px-3 py-2 shadow-md transition text-sm ${i===active?"bg-white font-bold":"bg-white"}`}>
+                    <input value={prof.name} onChange={(e)=>setName(i,e.target.value)} className="bg-transparent w-full text-center outline-none"/>
+                  </button>
+                ))}
+              </div>
+
+              {/* 情報カード */}
+              <div className="grid md:grid-cols-3 gap-3 mb-4">
+                <Card>平均周期: <span className="font-bold text-lg">{cycleAvg}日</span></Card>
+                <Card>平均出血: <span className="font-bold text-lg">{bleedAvg}日</span></Card>
+                <Card>{daysLeft>0 ? <span>予定日まであと <span className="font-extrabold text-xl text-pink-600">{daysLeft}</span> 日</span> : <span className="font-bold text-pink-600">今日が予定日！</span>}</Card>
+              </div>
+
+              {/* ワンタッチ */}
+              <div className="grid md:grid-cols-2 gap-3 mb-6">
+                <button onClick={handleStart} disabled={!!currentOpen}
+                  className={`w-full rounded-full p-4 text-lg font-semibold shadow-md transition ${currentOpen?"bg-pink-200 text-pink-800":"bg-pink-500 text-white"}`}>
+                  {currentOpen ? "🌸 生理中" : "🌸 今日から開始"}
+                </button>
+                <button onClick={handleEnd} disabled={!currentOpen}
+                  className={`w-full rounded-full p-4 text-lg font-semibold shadow-md transition ${!currentOpen?"bg-slate-200 text-slate-500":"bg-emerald-400 text-white"}`}>
+                  ✅ 生理終了
+                </button>
+              </div>
+
+              {/* カレンダー */}
+              <section className="mb-6">
+                <h2 className="text-lg font-bold text-pink-600 mb-2">カレンダー</h2>
+                <div className="flex justify-between mb-2 items-center">
+                  <button onClick={()=>setCalBase(new Date(calBase.getFullYear(), calBase.getMonth()-1,1))} className="px-2 py-1 rounded-full bg-pink-200">←</button>
+                  <div className="font-semibold">{calBase.getFullYear()}年 {calBase.getMonth()+1}月</div>
+                  <button onClick={()=>setCalBase(new Date(calBase.getFullYear(), calBase.getMonth()+1,1))} className="px-2 py-1 rounded-full bg-pink-200">→</button>
+                </div>
+                <table className="w-full border text-center text-sm overflow-hidden rounded-2xl">
+                  <thead><tr className="bg-pink-100">{["日","月","火","水","木","金","土"].map(d=><th key={d} className="py-1">{d}</th>)}</tr></thead>
+                  <tbody>
+                    {weeks.map((row,i)=>(
+                      <tr key={i}>
+                        {row.map(d=>{
+                          const iso=toISO(d);
+                          const inMonth=d.getMonth()===calBase.getMonth();
+                          const bg=cellBackground(iso);
+                          return (
+                            <td key={iso} className={`border h-14 w-14 relative align-top ${inMonth?"bg-white":"bg-pink-50"}`}
+                              style={ bg ? (bg.includes("linear-gradient")?{backgroundImage:bg}:{backgroundColor:bg}) : undefined }>
+                              <div className="text-[10px] pr-1 pt-1 text-right opacity-70">{d.getDate()}</div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="flex gap-3 items-center mt-2 text-xs">
+                  {profiles.map(prof=>(
+                    <div key={prof.id} className="flex items-center gap-1">
+                      <span className="inline-block w-3 h-3 rounded" style={{backgroundColor:prof.color}}></span>
+                      <span>{prof.name}</span>
+                    </div>
+                  ))}
+                  <span className="ml-auto text-[11px] opacity-60">濃色=実績 / 薄色=予測</span>
+                </div>
+              </section>
+
+              {/* 今日の体調 */}
+              <section className="mb-6">
+                <h2 className="text-lg font-bold text-pink-600 mb-2">今日の体調（{day}）</h2>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {FLAGS.map(f=>(
+                    <label key={f} className={`cursor-pointer rounded-full border px-3 py-1 text-sm shadow-sm ${daySym.flags.includes(f)?"bg-pink-400 text-white":"bg-white text-pink-500"}`}>
+                      <input type="checkbox" className="hidden" checked={daySym.flags.includes(f)} onChange={()=>toggleFlag(f)} />
+                      {f}
+                    </label>
+                  ))}
+                </div>
+                <div className="grid md:grid-cols-3 gap-3">
+                  <input type="text" placeholder="体温 (例: 36.7)" value={daySym.temp||""} onChange={(e)=>setTemp(e.target.value)} className="rounded-xl border px-3 py-2 shadow-sm" />
+                  <input type="text" placeholder="メモ" value={daySym.note||""} onChange={(e)=>setNote(e.target.value)} className="rounded-xl border px-3 py-2 shadow-sm md:col-span-2" />
+                </div>
+              </section>
+
+              {/* 最近の記録 */}
+              <section className="mb-10">
+                <h2 className="text-lg font-bold text-pink-600 mb-2">最近の記録</h2>
+                <div className="grid gap-2">
+                  {recent.length===0 && <Empty>まだ記録がありません</Empty>}
+                  {recent.map((pr,idx)=>(
+                    <div key={idx} className="rounded-2xl border bg-white p-3 shadow-sm">
+                      <div className="font-semibold">開始: {pr.start}</div>
+                      <div>終了: {pr.end || "—"}</div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              {/* 通知（ユーザー別） */}
+              <section className="mb-6">
+                <h2 className="text-lg font-bold text-pink-600 mb-2">通知（アプリ起動中に作動）</h2>
+                <div className="grid gap-3">
+                  {profiles.map((prof,i)=>(
+                    <div key={prof.id} className="rounded-2xl border bg-white p-3 shadow-sm">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="inline-block w-3 h-3 rounded" style={{backgroundColor:prof.color}}></span>
+                        <span className="font-semibold">{prof.name}</span>
+                        <button onClick={()=>setNotifyOn(i, !prof.notify.on)}
+                          className={`ml-auto px-3 py-1 rounded-full shadow ${prof.notify.on?"bg-emerald-400 text-white":"bg-slate-200 text-slate-600"}`}>
+                          {prof.notify.on ? "🔔 ON" : "🔕 OFF"}
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm">
+                        <span>毎日</span>
+                        <input type="number" min="0" max="23" value={prof.notify.hh}
+                          onChange={(e)=>setNotifyTime(i, clamp(Number(e.target.value||0),0,23), prof.notify.mm)}
+                          className="w-14 rounded-xl border px-2 py-1" />
+                        <span>時</span>
+                        <input type="number" min="0" max="59" value={prof.notify.mm}
+                          onChange={(e)=>setNotifyTime(i, prof.notify.hh, clamp(Number(e.target.value||0),0,59))}
+                          className="w-14 rounded-xl border px-2 py-1" />
+                        <span>分に「予定日まであと◯日」を通知</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="text-xs text-slate-500 mt-2">※ ブラウザ通知の許可が必要。閉じてても鳴らすにはPWA+Push（FCM/VAPID）対応が必要。</div>
+              </section>
+
+              {/* バックアップ / 移行 */}
+              <section className="mt-8 mb-20">
+                <h2 className="text-lg font-bold text-pink-600 mb-2">バックアップ / 移行</h2>
+                <div className="grid md:grid-cols-2 gap-3">
+                  <button onclick="exportJSON()" className="rounded-full bg-pink-500 text-white px-4 py-2 shadow">JSONを書き出す（全データ）</button>
+                  <button onclick="exportCSV()" className="rounded-full bg-pink-500 text-white px-4 py-2 shadow">CSVを書き出す（期間&体調）</button>
+                </div>
+                <div className="mt-3 p-3 rounded-2xl border bg-white">
+                  <div className="text-sm mb-2">JSONを読み込む（上書き）</div>
+                  <input type="file" accept="application/json" onchange="importJSON(event)" className="block" />
+                  <div className="text-[11px] opacity-60 mt-1">※ 読み込むと現在のデータは置き換わります。必要なら先にエクスポートしてください。</div>
+                </div>
+              </section>
+
+              <footer className="mt-8 text-center text-[11px] opacity-60">v0.6 単一HTML版（PWA準備済・Pushは別途）</footer>
+            </div>
+          </div>
+        );
+      }
+
+      // React起動
+      createRoot(document.getElementById("root")).render(React.createElement(App));
+
+      // ========= ここまで App =========
+
+      // ====== 内蔵アイコン/マニフェスト（簡易データURL）======
+      const svgIcon = encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512">
+          <rect width="100%" height="100%" fill="#fdf2f8"/>
+          <g transform="translate(256,270)">
+            <!-- うさぎ（丸っこい簡易） -->
+            <ellipse cx="0" cy="60" rx="120" ry="90" fill="#fff" />
+            <ellipse cx="-50" cy="-10" rx="35" ry="90" fill="#fff"/>
+            <ellipse cx="50" cy="-10" rx="35" ry="90" fill="#fff"/>
+            <ellipse cx="-50" cy="-25" rx="18" ry="55" fill="#fecdd3"/>
+            <ellipse cx="50" cy="-25" rx="18" ry="55" fill="#fecdd3"/>
+            <circle cx="-25" cy="40" r="8" fill="#0f172a"/>
+            <circle cx="25" cy="40" r="8" fill="#0f172a"/>
+            <circle cx="0" cy="60" r="6" fill="#0f172a"/>
+            <circle cx="-10" cy="65" r="6" fill="#fb7185" />
+            <circle cx="10" cy="65" r="6" fill="#fb7185" />
+          </g>
+          <!-- 耳に寄り添う「3」 -->
+          <text x="355" y="120" font-size="120" font-family="Arial Rounded MT Bold, sans-serif" fill="#ec4899">3</text>
+        </svg>
+      `);
+      const iconDataURL = `data:image/svg+xml;charset=utf-8,${svgIcon}`;
+      document.getElementById("apple-icon").setAttribute("href", iconDataURL);
+
+      const manifestObj = {
+        name: "3人用 生理日記録・予測",
+        short_name: "生理予測3",
+        start_url: ".",
+        display: "standalone",
+        background_color: "#fdf2f8",
+        theme_color: "#ec4899",
+        icons: [
+          { src: iconDataURL, sizes: "192x192", type: "image/svg+xml", purpose: "any" },
+          { src: iconDataURL, sizes: "512x512", type: "image/svg+xml", purpose: "any" }
+        ]
+      };
+      const manifestURL = URL.createObjectURL(new Blob([JSON.stringify(manifestObj)], {type:"application/manifest+json"}));
+      document.getElementById("app-manifest").setAttribute("href", manifestURL);
+
+      // ====== 内蔵Service WorkerをBlobから登録 ======
+      const swCode = `
+        const CACHE_NAME = "period3-cache-v1";
+        const APP_SHELL = ["/", "/index.html"];
+        self.addEventListener("install", (event) => {
+          event.waitUntil(caches.open(CACHE_NAME).then((cache)=>cache.addAll(APP_SHELL)).catch(()=>{}));
+          self.skipWaiting();
+        });
+        self.addEventListener("activate", (event) => {
+          event.waitUntil(
+            caches.keys().then(keys=>Promise.all(keys.map(k=>k!==CACHE_NAME?caches.delete(k):Promise.resolve())))
+          );
+          self.clients.claim();
+        });
+        self.addEventListener("fetch", (event) => {
+          if(event.request.method!=="GET") return;
+          event.respondWith(
+            caches.match(event.request).then(cached=> cached || fetch(event.request).then(resp=>{
+              const copy=resp.clone();
+              caches.open(CACHE_NAME).then(cache=>cache.put(event.request, copy));
+              return resp;
+            }).catch(()=>cached))
+          );
+        });
+        self.addEventListener("push",(event)=>{
+          try{
+            const data = event.data ? event.data.json() : {};
+            event.waitUntil(self.registration.showNotification(data.title||"通知",{ body:data.body||"" }));
+          }catch(e){
+            event.waitUntil(self.registration.showNotification("通知",{ body: event.data && event.data.text() }));
+          }
+        });
+        self.addEventListener("notificationclick",(event)=>{ event.notification.close(); event.waitUntil(clients.openWindow("/")); });
+      `;
+      if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+        const swUrl = URL.createObjectURL(new Blob([swCode], {type:"text/javascript"}));
+        navigator.serviceWorker.register(swUrl).catch(()=>{});
+      }
+    </script>
+  </body>
+</html>
