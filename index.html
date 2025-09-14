@@ -9,10 +9,10 @@
     <!-- React / ReactDOM -->
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-    <!-- Babel（ブラウザでJSX変換） -->
+    <!-- Babel（JSX変換） -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- PWA manifest を後でJSで注入（アップしたPNGを使う） -->
+    <!-- PWA manifest（あとでアイコンをJSで注入） -->
     <link id="app-manifest" rel="manifest" href="">
     <link id="apple-icon" rel="apple-touch-icon" href="">
     <meta name="theme-color" content="#ec4899" />
@@ -23,11 +23,10 @@
   <body class="bg-pink-50">
     <div id="root"></div>
 
-    <!-- アプリ本体 -->
     <script type="text/babel">
       const {useEffect,useMemo,useRef,useState} = React;
 
-      /* ========== util ========== */
+      /* ===== util ===== */
       const fmt=(d)=>new Date(d.getFullYear(),d.getMonth(),d.getDate());
       const toISO=(d)=>fmt(d).toISOString().slice(0,10);
       const fromISO=(s)=>{const [y,m,d]=s.split("-").map(Number);return new Date(y,m-1,d);};
@@ -36,8 +35,17 @@
       const daysBetween=(aISO,bISO)=>Math.round((fmt(fromISO(bISO))-fmt(fromISO(aISO)))/86400000);
       const addDays=(iso,n)=>{const d=fromISO(iso);d.setDate(d.getDate()+n);return toISO(d);};
       const monthMatrix=(baseDate)=>{const first=new Date(baseDate.getFullYear(),baseDate.getMonth(),1);const start=new Date(first);start.setDate(start.getDate()-start.getDay());const weeks=[];for(let w=0;w<6;w++){const row=[];for(let d=0;d<7;d++){row.push(new Date(start));start.setDate(start.getDate()+1);}weeks.push(row);}return weeks;};
+      const parseFlexDate=(s)=>{
+        if(!s) return null;
+        const t=s.trim().replace(/[.\s/]/g,'-').replace(/--+/g,'-');
+        const m=t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+        if(!m) return null;
+        const y=+m[1], mo=+m[2], d=+m[3];
+        if(mo<1||mo>12||d<1||d>31) return null;
+        return toISO(new Date(y,mo-1,d));
+      };
 
-      /* ========== prediction ========== */
+      /* ===== algo ===== */
       function calcCycleAvgWeighted(starts){
         if(!starts||starts.length<2) return 28;
         const diffs=[]; for(let i=1;i<starts.length;i++) diffs.push(daysBetween(starts[i-1],starts[i]));
@@ -53,7 +61,7 @@
         return clamp(Math.round(spans.reduce((s,v)=>s+v,0)/spans.length),2,10);
       }
 
-      /* ========== data ========== */
+      /* ===== data ===== */
       const DEFAULT_PROFILES = [
         { id:"p1", label:"Aさん", color:"#f472b6", notify:{on:false,hh:8,mm:30}, logs:{periods:[],symptoms:{}} },
         { id:"p2", label:"Bさん", color:"#fb7185", notify:{on:false,hh:8,mm:30}, logs:{periods:[],symptoms:{}} },
@@ -61,22 +69,20 @@
       ];
       const FLAGS=["腹痛","頭痛","だるさ","イライラ","敏感","眠い"];
 
-      /* ========== helpers for icon resizing ========== */
+      /* ===== icon helpers (設定からPNGアップ→manifest更新) ===== */
       async function fileToDataURL(file){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(file); }); }
       function resizeDataURL(dataUrl, size){
         return new Promise((resolve)=>{
           const img=new Image(); img.onload=()=>{ 
             const s=Math.max(img.width,img.height);
-            const canvas=document.createElement("canvas"); canvas.width=size; canvas.height=size;
-            const ctx=canvas.getContext("2d");
-            // 背景透過のまま中央に収める
+            const c=document.createElement("canvas"); c.width=size; c.height=size;
+            const ctx=c.getContext("2d");
             const off=document.createElement("canvas"); off.width=s; off.height=s;
-            const octx=off.getContext("2d"); octx.clearRect(0,0,s,s);
-            octx.drawImage(img,(s-img.width)/2,(s-img.height)/2);
-            ctx.clearRect(0,0,size,size);
+            const o=off.getContext("2d"); o.clearRect(0,0,s,s);
+            o.drawImage(img,(s-img.width)/2,(s-img.height)/2);
             ctx.imageSmoothingQuality="high";
             ctx.drawImage(off,0,0,size,size);
-            resolve(canvas.toDataURL("image/png"));
+            resolve(c.toDataURL("image/png"));
           };
           img.src=dataUrl;
         });
@@ -89,14 +95,13 @@
         localStorage.setItem("period3_icon_512", icon512);
         localStorage.setItem("period3_icon_192", icon192);
         localStorage.setItem("period3_icon_180", icon180);
-        applyManifestIcons(); // 反映
+        applyManifestIcons(); 
       }
-
       function applyManifestIcons(){
         const i512 = localStorage.getItem("period3_icon_512");
         const i192 = localStorage.getItem("period3_icon_192");
         const i180 = localStorage.getItem("period3_icon_180");
-        const v = String(Date.now()); // キャッシュ更新用
+        const v = String(Date.now());
         const manifestObj = {
           name: "3人用 生理日記録・予測",
           short_name: "生理予測3",
@@ -105,8 +110,8 @@
           background_color: "#fdf2f8",
           theme_color: "#ec4899",
           icons: [
-            { src: i192 || i512 || "", sizes: "192x192", type: "image/png", purpose: "any" },
-            { src: i512 || i192 || "", sizes: "512x512", type: "image/png", purpose: "any" }
+            { src: i192 || i512 || "", sizes: "192x192", type: "image/png" },
+            { src: i512 || i192 || "", sizes: "512x512", type: "image/png" }
           ]
         };
         const url = URL.createObjectURL(new Blob([JSON.stringify(manifestObj)],{type:"application/manifest+json"}));
@@ -114,50 +119,81 @@
         if(i180) document.getElementById("apple-icon").setAttribute("href", i180 + "#v=" + v);
       }
 
-      /* ========== UI bits ========== */
+      /* ===== tiny UI parts ===== */
       const Card=({children})=><div className="rounded-2xl border bg-white p-4 shadow-sm text-center text-pink-600">{children}</div>;
       const Empty=({children})=><div className="rounded-2xl border border-dashed bg-pink-50 p-4 text-center text-pink-400">{children}</div>;
       const IconBtn=({children,onClick,title})=><button onClick={onClick} title={title} className="rounded-full bg-white/70 hover:bg-white px-3 py-2 shadow border">{children}</button>;
 
-      /* ========== App ========== */
+      /* ===== App ===== */
       function App(){
-        const [profiles,setProfiles]=React.useState(DEFAULT_PROFILES);
-        const [active,setActive]=React.useState(0);
-        const [calBase,setCalBase]=React.useState(fmt(new Date()));
-        const [showSettings,setShowSettings]=React.useState(false);
-        const lastNotifyKeyRef=React.useRef("");
+        const [profiles,setProfiles]=useState(DEFAULT_PROFILES);
+        const [active,setActive]=useState(0);
+        const [calBase,setCalBase]=useState(fmt(new Date()));
+        const [showSettings,setShowSettings]=useState(false);
+        const [showHistory,setShowHistory]=useState(false); // ★過去登録モーダル
+        const lastNotifyKeyRef=useRef("");
 
-        // load/save
-        React.useEffect(()=>{
+        useEffect(()=>{
           const raw=localStorage.getItem("period3_profiles_v5");
           if(raw){ try{ const p=JSON.parse(raw); if(Array.isArray(p)&&p.length===3) setProfiles(p);}catch{} }
           lastNotifyKeyRef.current=localStorage.getItem("period3_last_notify_key")||"";
-          applyManifestIcons(); // 起動時に反映
+          applyManifestIcons();
         },[]);
-        React.useEffect(()=>{ localStorage.setItem("period3_profiles_v5", JSON.stringify(profiles)); },[profiles]);
+        useEffect(()=>{ localStorage.setItem("period3_profiles_v5", JSON.stringify(profiles)); },[profiles]);
 
         const p=profiles[active];
-        const starts=React.useMemo(()=>[...p.logs.periods].map(x=>x.start).sort(),[p.logs.periods]);
-        const cycleAvg=React.useMemo(()=>calcCycleAvgWeighted(starts),[starts]);
-        const bleedAvg=React.useMemo(()=>calcAvgBleedDays(p.logs.periods),[p.logs.periods]);
+        const starts=useMemo(()=>[...p.logs.periods].map(x=>x.start).sort(),[p.logs.periods]);
+        const cycleAvg=useMemo(()=>calcCycleAvgWeighted(starts),[starts]);
+        const bleedAvg=useMemo(()=>calcAvgBleedDays(p.logs.periods),[p.logs.periods]);
         const lastStart=starts.length?starts[starts.length-1]:null;
         const nextStartPred= lastStart? addDays(lastStart,cycleAvg) : addDays(todayISO(),28);
         const daysLeft=daysBetween(todayISO(), nextStartPred);
         const currentOpen=p.logs.periods.find(pr=>pr.start && !pr.end);
 
-        // 前回の生理（終了ありの直近）
+        // 前回（終了ありの最新）
         const closed=[...(p.logs.periods||[])].filter(pr=>pr.start&&pr.end).sort((a,b)=>a.start.localeCompare(b.start));
         const prev=closed.length?closed[closed.length-1]:null;
-        const prevSpanDays = prev ? (daysBetween(prev.start, prev.end)+1) : null;
+        const prevSpanDays=prev?daysBetween(prev.start,prev.end)+1:null;
+
+        // helpers
+        const updateProfile=(i,fn)=>setProfiles(prev=>{const c=JSON.parse(JSON.stringify(prev)); fn(c[i]); return c;});
+        const addPeriod=(i,startISO,endISO)=>{
+          if(!startISO) return;
+          const start=parseFlexDate(startISO)||startISO;
+          const end=endISO? (parseFlexDate(endISO)||endISO) : null;
+          if(end && start>end){ alert("終了日は開始日以降にしてください"); return; }
+          updateProfile(i,d=>{
+            const exists=d.logs.periods.some(pr=>pr.start===start && (pr.end||"")===(end||""));
+            if(!exists){ d.logs.periods=[...d.logs.periods,{start, end:end||null}].sort((a,b)=>a.start.localeCompare(b.start)); }
+          });
+        };
+        const bulkAdd=(i,text)=>{
+          const lines=(text||"").split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+          let ok=0, ng=0;
+          updateProfile(i,d=>{
+            const arr=[...d.logs.periods];
+            lines.forEach(l=>{
+              const parts=l.split(/[\s,;\t]+/).filter(Boolean);
+              const s=parseFlexDate(parts[0]); const e=parseFlexDate(parts[1]||"");
+              if(!s){ ng++; return; }
+              if(e && s>e){ ng++; return; }
+              const dup=arr.some(pr=>pr.start===s && (pr.end||"")===(e||""));
+              if(!dup){ arr.push({start:s, end:e||null}); ok++; }
+            });
+            arr.sort((a,b)=>a.start.localeCompare(b.start));
+            d.logs.periods=arr;
+          });
+          return {ok, ng};
+        };
 
         // actions
-        const updateProfile=(i,fn)=>setProfiles(prev=>{const c=JSON.parse(JSON.stringify(prev)); fn(c[i]); return c;});
-        const handleStart=()=>{ if(currentOpen) return; updateProfile(active,d=>{ d.logs.periods=[...d.logs.periods,{start:todayISO()}]; }); };
+        const handleStart=()=>{ if(currentOpen) return; addPeriod(active, todayISO(), null); };
         const handleEnd=()=>{ if(!currentOpen) return; updateProfile(active,d=>{ d.logs.periods=d.logs.periods.map(pr=>pr.start===currentOpen.start?{...pr,end:todayISO()}:pr); }); };
         const setNotifyTime=(i,hh,mm)=>updateProfile(i,d=>{ d.notify.hh=hh; d.notify.mm=mm; });
         const setNotifyOn=(i,on)=>updateProfile(i,d=>{ d.notify.on=on; });
         const setLabel=(i,v)=>updateProfile(i,d=>{ d.label=v; });
 
+        // day symptoms
         const day=todayISO();
         const daySym=p.logs.symptoms[day]||{flags:[],note:"",temp:""};
         const toggleFlag=(f)=>{const ex=daySym.flags.includes(f);const flags=ex?daySym.flags.filter(x=>x!==f):[...daySym.flags,f];updateProfile(active,d=>{ d.logs.symptoms={...d.logs.symptoms,[day]:{...daySym,flags}}; });};
@@ -167,7 +203,7 @@
         const recent=[...p.logs.periods].sort((a,b)=>a.start.localeCompare(b.start)).slice(-6).reverse();
 
         // notifications (app open)
-        React.useEffect(()=>{
+        useEffect(()=>{
           const id=setInterval(()=>{
             const now=new Date(); const key=`${toISO(new Date())}@${now.getHours()}:${now.getMinutes()}`;
             if(lastNotifyKeyRef.current===key) return;
@@ -192,7 +228,7 @@
           return ()=>clearInterval(id);
         },[profiles]);
 
-        // calendar backgrounds
+        // calendar bg
         const weeks=monthMatrix(calBase);
         function hexToRgb(hex){const h=hex.replace("#","");const n=parseInt(h,16);return `${(n>>16)&255}, ${(n>>8)&255}, ${n&255}`;}
         function cellBackground(iso){
@@ -214,20 +250,22 @@
           return layers.map((l,i)=>`repeating-linear-gradient(${45+i*15}deg, rgba(${hexToRgb(l.color)}, ${l.alpha}) 0 6px, transparent 6px 12px)`).join(",");
         }
 
+        /* ===== UI ===== */
         return (
           <div className="min-h-screen bg-pink-50 text-slate-900 p-4 font-sans">
             <div className="max-w-3xl mx-auto">
               <header className="mb-4 flex items-center justify-between">
                 <div className="text-center w-full">
                   <h1 className="text-3xl font-extrabold text-pink-600">🐰 3人用 生理日記録・予測</h1>
-                  <p className="text-xs text-pink-400">ピンク系カレンダー / 3人色分け / 前回の生理 / PWAアイコンアップロード</p>
+                  <p className="text-xs text-pink-400">ピンク系カレンダー / 3人色分け / 前回の生理 / 過去の記録 追加対応</p>
                 </div>
-                <div className="absolute right-4 top-4">
+                <div className="absolute right-4 top-4 flex gap-2">
+                  <IconBtn onClick={()=>setShowHistory(true)} title="過去の記録を追加">🗓️</IconBtn>
                   <IconBtn onClick={()=>setShowSettings(true)} title="設定">⚙️</IconBtn>
                 </div>
               </header>
 
-              {/* プロフ切替（ボタンで切替） */}
+              {/* プロフ切替 */}
               <div className="grid grid-cols-3 gap-2 mb-3">
                 {profiles.map((prof,i)=>(
                   <button key={prof.id} onClick={()=>setActive(i)}
@@ -341,50 +379,6 @@
                   ))}
                 </div>
               </section>
-
-              {/* 通知設定 */}
-              <section className="mb-6">
-                <h2 className="text-lg font-bold text-pink-600 mb-2">通知（アプリ起動中に作動）</h2>
-                <div className="grid gap-3">
-                  {profiles.map((prof,i)=>(
-                    <div key={prof.id} className="rounded-2xl border bg-white p-3 shadow-sm">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="inline-block w-3 h-3 rounded" style={{backgroundColor:prof.color}}></span>
-                        <span className="font-semibold">{prof.label}</span>
-                        <button onClick={()=>setNotifyOn(i,!prof.notify.on)} className={`ml-auto px-3 py-1 rounded-full shadow ${prof.notify.on?"bg-emerald-400 text-white":"bg-slate-200 text-slate-600"}`}>
-                          {prof.notify.on ? "🔔 ON" : "🔕 OFF"}
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2 text-sm">
-                        <span>毎日</span>
-                        <input type="number" min={0} max={23} value={prof.notify.hh}
-                          onChange={(e)=>setNotifyTime(i, clamp(Number(e.target.value||0),0,23), prof.notify.mm)}
-                          className="w-14 rounded-xl border px-2 py-1" />
-                        <span>時</span>
-                        <input type="number" min={0} max={59} value={prof.notify.mm}
-                          onChange={(e)=>setNotifyTime(i, prof.notify.hh, clamp(Number(e.target.value||0),0,59))}
-                          className="w-14 rounded-xl border px-2 py-1" />
-                        <span>分に「予定日まであと◯日」を通知</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="text-xs text-slate-500 mt-2">※ ブラウザ通知の許可が必要。閉じた状態でも鳴らすにはPWA+Pushが必要。</div>
-              </section>
-
-              {/* バックアップ / 移行 */}
-              <section className="mt-8 mb-20">
-                <h2 className="text-lg font-bold text-pink-600 mb-2">バックアップ / 移行</h2>
-                <div className="grid md:grid-cols-2 gap-3">
-                  <button onClick={()=>exportJSON()} className="rounded-full bg-pink-500 text-white px-4 py-2 shadow">JSONを書き出す（全データ）</button>
-                  <button onClick={()=>exportCSV()} className="rounded-full bg-pink-500 text-white px-4 py-2 shadow">CSVを書き出す（期間&体調）</button>
-                </div>
-                <div className="mt-3 p-3 rounded-2xl border bg-white">
-                  <div className="text-sm mb-2">JSONを読み込む（上書き）</div>
-                  <input type="file" accept="application/json" onChange={(e)=>importJSONFile(e)} className="block" />
-                  <div className="text-[11px] opacity-60 mt-1">※ 読み込むと現在のデータは置き換わります。必要なら先にエクスポートしてください。</div>
-                </div>
-              </section>
             </div>
 
             {/* 設定モーダル（名前 & アイコン） */}
@@ -401,16 +395,71 @@
                       </div>
                     ))}
                   </div>
-
                   <div className="mb-4">
-                    <div className="font-semibold text-sm mb-1">PWAアイコン（PNG推奨、正方形）</div>
-                    <input type="file" accept="image/*" onChange={async (e)=>{ const f=e.target.files?.[0]; if(f){ await setCustomIconsFromFile(f); alert("アイコンを適用しました！ホーム画面追加で反映されます。"); }}} />
-                    <div className="text-[11px] opacity-60 mt-1">※ 1回設定すれば次回以降も自動で使われます（端末内に保存）。</div>
+                    <div className="font-semibold text-sm mb-1">PWAアイコン（PNG）</div>
+                    <input type="file" accept="image/*" onChange={async (e)=>{ const f=e.target.files?.[0]; if(f){ await setCustomIconsFromFile(f); alert("アイコンを適用しました。ホーム画面に追加すると反映されます。"); }}} />
                   </div>
-
                   <div className="flex gap-2 justify-end">
                     <button onClick={()=>setShowSettings(false)} className="rounded-full px-4 py-2 border">閉じる</button>
                     <button onClick={()=>setShowSettings(false)} className="rounded-full px-4 py-2 bg-pink-500 text-white shadow">保存</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ★過去の記録モーダル（手動追加 / まとめ登録） */}
+            {showHistory && (
+              <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50">
+                <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
+                  <h3 className="text-lg font-bold text-pink-600 mb-3">過去の生理を追加（{profiles[active].label}）</h3>
+
+                  {/* 手動追加 */}
+                  <div className="mb-4">
+                    <div className="font-semibold text-sm mb-2">1件ずつ追加</div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-center">
+                      <input id="hist-start" type="date" className="rounded-xl border px-3 py-2 shadow-sm" />
+                      <span className="text-center text-sm">〜</span>
+                      <input id="hist-end" type="date" className="rounded-xl border px-3 py-2 shadow-sm" />
+                    </div>
+                    <div className="text-[11px] opacity-60 mt-1">※ 終了日は空でもOK（未終了として登録）</div>
+                    <div className="mt-2 text-right">
+                      <button className="rounded-full bg-pink-500 text-white px-4 py-2 shadow"
+                        onClick={()=>{
+                          const s=document.getElementById("hist-start").value;
+                          const e=document.getElementById("hist-end").value;
+                          if(!s){ alert("開始日を入れてね"); return; }
+                          addPeriod(active, s, e||null);
+                          document.getElementById("hist-start").value=""; document.getElementById("hist-end").value="";
+                          alert("追加しました！");
+                        }}>追加する</button>
+                    </div>
+                  </div>
+
+                  <hr className="my-4"/>
+
+                  {/* まとめ登録 */}
+                  <div className="mb-3">
+                    <div className="font-semibold text-sm mb-2">まとめ登録（コピペ）</div>
+                    <textarea id="hist-bulk" rows="6" className="w-full rounded-xl border px-3 py-2 shadow-sm" placeholder={`例:
+2024/05/01,2024/05/05
+2024/03/29,2024/04/02
+2024-02-26 2024-03-02`}></textarea>
+                    <div className="text-[11px] opacity-60 mt-1">
+                      1行1件、<code>開始日,終了日</code>（区切りはカンマ/タブ/スペースOK）／日付は <code>YYYY-MM-DD</code> / <code>YYYY/MM/DD</code> / <code>YYYY.MM.DD</code> などOK
+                    </div>
+                    <div className="mt-2 text-right">
+                      <button className="rounded-full bg-pink-500 text-white px-4 py-2 shadow"
+                        onClick={()=>{
+                          const txt=document.getElementById("hist-bulk").value;
+                          const {ok,ng}=bulkAdd(active, txt);
+                          alert(`登録: ${ok}件 / スキップ: ${ng}件`);
+                          document.getElementById("hist-bulk").value="";
+                        }}>まとめて登録</button>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 justify-end mt-2">
+                    <button onClick={()=>setShowHistory(false)} className="rounded-full px-4 py-2 border">閉じる</button>
                   </div>
                 </div>
               </div>
@@ -421,7 +470,7 @@
 
       /* export/import helpers */
       function download(filename,text){const blob=new Blob([text],{type:"text/plain;charset=utf-8"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=filename;a.click();URL.revokeObjectURL(url);}
-      function exportJSON(){const raw=localStorage.getItem("period3_profiles_v5")||localStorage.getItem("period3_profiles_v4")||localStorage.getItem("period3_profiles_v3")||localStorage.getItem("period3_profiles_v2")||localStorage.getItem("period3_profiles_v1");const data=raw?JSON.parse(raw):null;const payload={version:"v0.7",exportedAt:new Date().toISOString(),profiles:data};download(`period3_backup_${toISO(new Date())}.json`,JSON.stringify(payload,null,2));}
+      function exportJSON(){const raw=localStorage.getItem("period3_profiles_v5")||localStorage.getItem("period3_profiles_v4")||localStorage.getItem("period3_profiles_v3")||localStorage.getItem("period3_profiles_v2")||localStorage.getItem("period3_profiles_v1");const data=raw?JSON.parse(raw):null;const payload={version:"v0.8",exportedAt:new Date().toISOString(),profiles:data};download(`period3_backup_${toISO(new Date())}.json`,JSON.stringify(payload,null,2));}
       function exportCSV(){const raw=localStorage.getItem("period3_profiles_v5")||localStorage.getItem("period3_profiles_v4")||localStorage.getItem("period3_profiles_v3")||localStorage.getItem("period3_profiles_v2")||localStorage.getItem("period3_profiles_v1");const data=raw?JSON.parse(raw):[];const rows=[["user_id","name(label)","type","date","start","end","flags","temp","note"]];(data||[]).forEach(p=>{(p.logs.periods||[]).forEach(pr=>rows.push([p.id,p.label,"period","",pr.start||"",pr.end||"","","",""]));Object.entries(p.logs.symptoms||{}).forEach(([date,sym])=>rows.push([p.id,p.label,"symptom",date,"","",(sym.flags||[]).join("|"),sym.temp||"",String(sym.note||"").replace(/\n/g," ")]));});const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");download(`period3_export_${toISO(new Date())}.csv`,csv);}
       function importJSONFile(e){const file=e.target.files&&e.target.files[0];if(!file) return;const reader=new FileReader();reader.onload=()=>{try{const obj=JSON.parse(String(reader.result||"{}"));if(Array.isArray(obj))localStorage.setItem("period3_profiles_v5",JSON.stringify(obj));else if(obj&&Array.isArray(obj.profiles))localStorage.setItem("period3_profiles_v5",JSON.stringify(obj.profiles));else{alert("JSONの形式が違います");return;}window.location.reload();}catch{alert("読み込みに失敗しました");}};reader.readAsText(file);}
 
@@ -431,7 +480,7 @@
     <!-- Service Worker（キャッシュ） -->
     <script>
       const swCode = `
-        const CACHE_NAME="period3-cache-v3";
+        const CACHE_NAME="period3-cache-v4";
         const APP_SHELL=["/","/index.html"];
         self.addEventListener("install",e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(APP_SHELL)));self.skipWaiting();});
         self.addEventListener("activate",e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.map(k=>k!==CACHE_NAME?caches.delete(k):Promise.resolve()))));self.clients.claim();});
