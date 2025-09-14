@@ -105,6 +105,39 @@
         if(!spans.length) return 5;
         return clamp(Math.round(spans.reduce((s,v)=>s+v,0)/spans.length),2,10);
       }
+// プロフごとの、その日が「実績」or「予測」かを判定して色を返す
+function bandStyleFor(prof, iso){
+  // 実績（開始〜終了、または開始して終了未入力の日）
+  const actual = (prof.logs.periods||[]).some(pr=>{
+    if(!pr.start) return false;
+    if(pr.end)  return iso>=pr.start && iso<=pr.end;
+    return iso===pr.start; // 開始だけの日はその日の実績扱い
+  });
+  if(actual){
+    return { backgroundColor: withAlpha(prof.color, 0.55) };
+  }
+
+  // 予測（最後の開始日＋平均周期〜平均出血日数ぶん）
+  const starts=[...(prof.logs.periods||[])].map(x=>x.start).filter(Boolean).sort();
+  if(starts.length){
+    const cycle=calcCycleAvgWeighted(starts);
+    const bleed=calcAvgBleedDays(prof.logs.periods);
+    const lastStart=starts[starts.length-1];
+    const nxStart=addDays(lastStart,cycle);
+    const nxEnd=addDays(nxStart, bleed-1);
+    if(iso>=nxStart && iso<=nxEnd){
+      return { backgroundColor: withAlpha(prof.color, 0.22) };
+    }
+  }
+  return {}; // 何もなし
+}
+
+// 16進カラー + 透明度 → rgba() へ
+function withAlpha(hex, a){
+  const h=hex.replace("#",""); const n=parseInt(h,16);
+  const r=(n>>16)&255, g=(n>>8)&255, b=n&255;
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
 
       /* ===== data ===== */
       const DEFAULT_PROFILES = [
