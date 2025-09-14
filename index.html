@@ -12,17 +12,62 @@
     <!-- Babel（JSX変換） -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- PWA manifest（あとでアイコンをJSで注入） -->
+    <!-- PWA manifest（あとでJSで注入） -->
     <link id="app-manifest" rel="manifest" href="">
     <link id="apple-icon" rel="apple-touch-icon" href="">
     <meta name="theme-color" content="#ec4899" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <style>html,body,#root{height:100%;}</style>
+
+    <style>
+      html,body,#root{height:100%;}
+
+      /* ==== 背景A（ピンクドット＋グラデ） ==== */
+      @keyframes cuteGradient {0%{background-position:0 0}100%{background-position:400% 0}}
+      .bg-kawaii-a{
+        background:
+          radial-gradient(rgba(236,72,153,.12) 1.2px, transparent 1.3px) 0 0/22px 22px,
+          linear-gradient(120deg,#fff1f5,#ffe4e6,#ffe4f1,#fff1f5);
+        background-size: 22px 22px, 400% 400%;
+        animation: cuteGradient 18s ease infinite;
+      }
+
+      /* ==== 背景B（うさぎ柄） ==== */
+      .bg-kawaii-b{
+        --tile: url("data:image/svg+xml;utf8,\
+        <svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'>\
+          <rect width='100%' height='100%' fill='%23fff1f5'/>\
+          <g transform='translate(8,10)'>\
+            <rect x='0' y='0' width='36' height='24' rx='12' fill='white' stroke='%23ff77aa' stroke-width='2'/>\
+            <circle cx='12' cy='12' r='2.5' fill='%2322253a'/>\
+            <circle cx='24' cy='12' r='2.5' fill='%2322253a'/>\
+            <circle cx='18' cy='15' r='2' fill='%2322253a'/>\
+          </g>\
+          <text x='46' y='18' font-size='16' font-family='Arial' fill='%23ff8fb7'>❤</text>\
+        </svg>");
+        background: var(--tile) 0 0/64px 64px, linear-gradient(180deg,#fff1f5,#ffe4e6);
+      }
+
+      /* ==== 背景C（ふわふわハート） ==== */
+      @keyframes floatUp {
+        0%{transform:translateY(20px);opacity:.0}
+        15%{opacity:.18}
+        100%{transform:translateY(-120vh);opacity:0}
+      }
+      .bg-kawaii-c{background:linear-gradient(180deg,#fff1f5,#ffe4e6);}
+      .bg-kawaii-c .heart{
+        position:absolute;bottom:-40px;opacity:.15;font-size:18px;
+        animation:floatUp linear infinite;
+      }
+    </style>
   </head>
   <body class="bg-pink-50">
+    <!-- 背景レイヤー -->
+    <div id="bgDecor" class="fixed inset-0 -z-10 pointer-events-none"></div>
+
     <div id="root"></div>
 
+    <!-- Reactアプリ本体 -->
     <script type="text/babel">
       const {useEffect,useMemo,useRef,useState} = React;
 
@@ -69,7 +114,7 @@
       ];
       const FLAGS=["腹痛","頭痛","だるさ","イライラ","敏感","眠い"];
 
-      /* ===== icon helpers（アップしたPNGをPWAに反映） ===== */
+      /* ===== icon helpers（PNG→PWAアイコン） ===== */
       async function fileToDataURL(file){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(file); }); }
       function resizeDataURL(dataUrl, size){
         return new Promise((resolve)=>{
@@ -119,12 +164,7 @@
         if(i180) document.getElementById("apple-icon").setAttribute("href", i180 + "#v=" + v);
       }
 
-      /* ===== tiny UI parts ===== */
-      const Card=({children})=><div className="rounded-2xl border bg-white p-4 shadow-sm text-center text-pink-600">{children}</div>;
-      const Empty=({children})=><div className="rounded-2xl border border-dashed bg-pink-50 p-4 text-center text-pink-400">{children}</div>;
-      const IconBtn=({children,onClick,title})=><button onClick={onClick} title={title} className="rounded-full bg-white/70 hover:bg-white px-3 py-2 shadow border">{children}</button>;
-
-      /* ===== App ===== */
+      /* ===== App（本体） ===== */
       function App(){
         const [profiles,setProfiles]=useState(DEFAULT_PROFILES);
         const [active,setActive]=useState(0);
@@ -133,6 +173,25 @@
         const [showHistory,setShowHistory]=useState(false);
         const lastNotifyKeyRef=useRef("");
 
+        /* 背景スタイル（A/B/C） */
+        const [bg,setBg]=useState(localStorage.getItem("fleur_bg")||"a");
+        useEffect(()=>{
+          const el=document.getElementById("bgDecor");
+          if(bg==="a"){el.className="fixed inset-0 -z-10 pointer-events-none bg-kawaii-a";el.innerHTML="";}
+          if(bg==="b"){el.className="fixed inset-0 -z-10 pointer-events-none bg-kawaii-b";el.innerHTML="";}
+          if(bg==="c"){
+            el.className="fixed inset-0 -z-10 pointer-events-none bg-kawaii-c";
+            el.innerHTML=`
+              <div class="heart" style="left:10%; animation-duration:16s;">❤</div>
+              <div class="heart" style="left:30%; animation-duration:18s;">❤</div>
+              <div class="heart" style="left:55%; animation-duration:20s;">❤</div>
+              <div class="heart" style="left:75%; animation-duration:22s;">❤</div>
+            `;
+          }
+          localStorage.setItem("fleur_bg", bg);
+        },[bg]);
+
+        // load/save
         useEffect(()=>{
           const raw=localStorage.getItem("period3_profiles_v5");
           if(raw){ try{ const p=JSON.parse(raw); if(Array.isArray(p)&&p.length===3) setProfiles(p);}catch{} }
@@ -196,6 +255,7 @@
         // day symptoms
         const day=todayISO();
         const daySym=p.logs.symptoms[day]||{flags:[],note:"",temp:""};
+        const FLAGS=["腹痛","頭痛","だるさ","イライラ","敏感","眠い"];
         const toggleFlag=(f)=>{const ex=daySym.flags.includes(f);const flags=ex?daySym.flags.filter(x=>x!==f):[...daySym.flags,f];updateProfile(active,d=>{ d.logs.symptoms={...d.logs.symptoms,[day]:{...daySym,flags}}; });};
         const setNote=(v)=>updateProfile(active,d=>{ d.logs.symptoms={...d.logs.symptoms,[day]:{...daySym,note:v}}; });
         const setTemp=(v)=>updateProfile(active,d=>{ d.logs.symptoms={...d.logs.symptoms,[day]:{...daySym,temp:v}}; });
@@ -257,11 +317,11 @@
               <header className="mb-4 flex items-center justify-between pt-10">
                 <div className="text-center w-full">
                   <h1 className="text-3xl font-extrabold text-pink-600">🌸 Fleur Diary</h1>
-                  <p className="text-xs text-pink-400">ピンク系カレンダー / 3人色分け / 前回の生理 / 過去の記録 追加対応</p>
+                  <p className="text-xs text-pink-400">ピンク系カレンダー / 3人色分け / 前回の生理 / 過去の記録 / 背景切替 / PWA対応</p>
                 </div>
                 <div className="absolute right-4 top-6 flex gap-2">
-                  <IconBtn onClick={()=>setShowHistory(true)} title="過去の記録を追加">🗓️</IconBtn>
-                  <IconBtn onClick={()=>setShowSettings(true)} title="設定">⚙️</IconBtn>
+                  <button onClick={()=>setShowHistory(true)} title="過去の記録を追加" className="rounded-full bg-white/70 hover:bg-white px-3 py-2 shadow border">🗓️</button>
+                  <button onClick={()=>setShowSettings(true)} title="設定" className="rounded-full bg-white/70 hover:bg-white px-3 py-2 shadow border">⚙️</button>
                 </div>
               </header>
 
@@ -281,9 +341,9 @@
 
               {/* 情報カード */}
               <div className="grid md:grid-cols-3 gap-3 mb-4">
-                <Card>平均周期: <span className="font-bold text-lg">{cycleAvg}日</span></Card>
-                <Card>平均出血: <span className="font-bold text-lg">{bleedAvg}日</span></Card>
-                <Card>{daysLeft>0?<span>予定日まであと <span className="font-extrabold text-xl text-pink-600">{daysLeft}</span> 日</span>:<span className="font-bold text-pink-600">今日が予定日！</span>}</Card>
+                <div className="rounded-2xl border bg-white p-4 shadow-sm text-center text-pink-600">平均周期: <span className="font-bold text-lg">{cycleAvg}日</span></div>
+                <div className="rounded-2xl border bg-white p-4 shadow-sm text-center text-pink-600">平均出血: <span className="font-bold text-lg">{bleedAvg}日</span></div>
+                <div className="rounded-2xl border bg-white p-4 shadow-sm text-center text-pink-600">{daysLeft>0?<span>予定日まであと <span className="font-extrabold text-xl text-pink-600">{daysLeft}</span> 日</span>:<span className="font-bold text-pink-600">今日が予定日！</span>}</div>
               </div>
 
               {/* 前回の生理 */}
@@ -294,7 +354,7 @@
                     <div><span className="font-semibold">{p.label}</span>：{prev.start} 〜 {prev.end}（<span className="font-semibold">{prevSpanDays}</span>日）</div>
                   </div>
                 ) : (
-                  <Empty>まだ「開始→終了」の記録がありません</Empty>
+                  <div className="rounded-2xl border border-dashed bg-pink-50 p-4 text-center text-pink-400">まだ「開始→終了」の記録がありません</div>
                 )}
               </section>
 
@@ -326,8 +386,8 @@
                         {row.map(d=>{
                           const iso=toISO(d);
                           const inMonth=d.getMonth()===calBase.getMonth();
-                          const bg=cellBackground(iso);
-                          const style= bg ? (bg.includes("linear-gradient")?{backgroundImage:bg}:{backgroundColor:bg}) : undefined;
+                          const bgCell=cellBackground(iso);
+                          const style= bgCell ? (bgCell.includes("linear-gradient")?{backgroundImage:bgCell}:{backgroundColor:bgCell}) : undefined;
                           return (
                             <td key={iso} className={`border h-14 w-14 relative align-top ${inMonth?"bg-white":"bg-pink-50"}`} style={style}>
                               <div className="text-[10px] pr-1 pt-1 text-right opacity-70">{d.getDate()}</div>
@@ -370,7 +430,7 @@
               <section className="mb-10">
                 <h2 className="text-lg font-bold text-pink-600 mb-2">最近の記録</h2>
                 <div className="grid gap-2">
-                  {recent.length===0 && <Empty>まだ記録がありません</Empty>}
+                  {recent.length===0 && <div className="rounded-2xl border border-dashed bg-pink-50 p-4 text-center text-pink-400">まだ記録がありません</div>}
                   {recent.map((pr,idx)=>(
                     <div key={idx} className="rounded-2xl border bg-white p-3 shadow-sm">
                       <div className="font-semibold">開始: {pr.start}</div>
@@ -381,24 +441,45 @@
               </section>
             </div>
 
-            {/* 設定モーダル（名前 & アイコン） */}
+            {/* 設定モーダル（名前 & アイコン & 背景） */}
             {showSettings && (
               <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50">
                 <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
                   <h3 className="text-lg font-bold text-pink-600 mb-3">設定</h3>
+
                   <div className="grid gap-3 mb-4">
                     {profiles.map((prof,i)=>(
                       <div key={prof.id} className="flex items-center gap-2">
                         <span className="inline-block w-3 h-3 rounded" style={{backgroundColor:prof.color}}></span>
-                        <input value={prof.label} onChange={(e)=>setLabel(i,e.target.value)}
+                        <input value={prof.label} onChange={(e)=>{const v=e.target.value; setProfiles(prev=>{const c=JSON.parse(JSON.stringify(prev)); c[i].label=v; return c;});}}
                           className="flex-1 rounded-xl border px-3 py-2 shadow-sm" placeholder={`ユーザー${i+1}の名前`} />
                       </div>
                     ))}
                   </div>
+
                   <div className="mb-4">
                     <div className="font-semibold text-sm mb-1">PWAアイコン（PNG）</div>
                     <input type="file" accept="image/*" onChange={async (e)=>{ const f=e.target.files?.[0]; if(f){ await setCustomIconsFromFile(f); alert("アイコンを適用しました。ホーム画面に追加すると反映されます。"); }}} />
                   </div>
+
+                  <div className="mb-4">
+                    <div className="font-semibold text-sm mb-2">背景スタイル</div>
+                    <div className="grid grid-cols-3 gap-2 text-sm">
+                      <label className={`cursor-pointer rounded-xl border p-2 text-center ${bg==="a"?"ring-2 ring-pink-400":""}`}>
+                        <input type="radio" name="bg" className="hidden" checked={bg==="a"} onChange={()=>setBg("a")} />
+                        ドット
+                      </label>
+                      <label className={`cursor-pointer rounded-xl border p-2 text-center ${bg==="b"?"ring-2 ring-pink-400":""}`}>
+                        <input type="radio" name="bg" className="hidden" checked={bg==="b"} onChange={()=>setBg("b")} />
+                        うさぎ
+                      </label>
+                      <label className={`cursor-pointer rounded-xl border p-2 text-center ${bg==="c"?"ring-2 ring-pink-400":""}`}>
+                        <input type="radio" name="bg" className="hidden" checked={bg==="c"} onChange={()=>setBg("c")} />
+                        ハート
+                      </label>
+                    </div>
+                  </div>
+
                   <div className="flex gap-2 justify-end">
                     <button onClick={()=>setShowSettings(false)} className="rounded-full px-4 py-2 border">閉じる</button>
                     <button onClick={()=>setShowSettings(false)} className="rounded-full px-4 py-2 bg-pink-500 text-white shadow">保存</button>
@@ -428,8 +509,23 @@
                           const s=document.getElementById("hist-start").value;
                           const e=document.getElementById("hist-end").value;
                           if(!s){ alert("開始日を入れてね"); return; }
-                          addPeriod(active, s, e||null);
-                          document.getElementById("hist-start").value=""; document.getElementById("hist-end").value="";
+                          const start=parseFlexDate(s)||s;
+                          const end=e?(parseFlexDate(e)||e):null;
+                          if(end && start>end){ alert("終了日は開始日以降にしてください"); return; }
+                          const i=active;
+                          // add
+                          setProfiles(prev=>{
+                            const c=JSON.parse(JSON.stringify(prev));
+                            const arr=c[i].logs.periods||[];
+                            if(!arr.some(pr=>pr.start===start && (pr.end||"")===(end||""))){
+                              arr.push({start, end:end||null});
+                              arr.sort((a,b)=>a.start.localeCompare(b.start));
+                              c[i].logs.periods=arr;
+                            }
+                            return c;
+                          });
+                          document.getElementById("hist-start").value="";
+                          document.getElementById("hist-end").value="";
                           alert("追加しました！");
                         }}>追加する</button>
                     </div>
@@ -444,14 +540,31 @@
 2024/05/01,2024/05/05
 2024/03/29,2024/04/02
 2024-02-26 2024-03-02`}></textarea>
-                    <div className="text-[11px] opacity-60 mt-1">
+                    <div className="text:[11px] opacity-60 mt-1">
                       1行1件、<code>開始日,終了日</code>（区切りはカンマ/タブ/スペースOK）／日付は <code>YYYY-MM-DD</code> / <code>YYYY/MM/DD</code> / <code>YYYY.MM.DD</code> などOK
                     </div>
                     <div className="mt-2 text-right">
                       <button className="rounded-full bg-pink-500 text-white px-4 py-2 shadow"
                         onClick={()=>{
                           const txt=document.getElementById("hist-bulk").value;
-                          const {ok,ng}=bulkAdd(active, txt);
+                          const lines=(txt||"").split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+                          let ok=0, ng=0;
+                          setProfiles(prev=>{
+                            const c=JSON.parse(JSON.stringify(prev));
+                            const arr=c[active].logs.periods||[];
+                            lines.forEach(l=>{
+                              const parts=l.split(/[\s,;\t]+/).filter(Boolean);
+                              const s=parseFlexDate(parts[0]); const e=parseFlexDate(parts[1]||"");
+                              if(!s){ ng++; return; }
+                              if(e && s>e){ ng++; return; }
+                              if(!arr.some(pr=>pr.start===s && (pr.end||"")===(e||""))){
+                                arr.push({start:s, end:e||null}); ok++;
+                              }
+                            });
+                            arr.sort((a,b)=>a.start.localeCompare(b.start));
+                            c[active].logs.periods=arr;
+                            return c;
+                          });
                           alert(`登録: ${ok}件 / スキップ: ${ng}件`);
                           document.getElementById("hist-bulk").value="";
                         }}>まとめて登録</button>
@@ -470,7 +583,7 @@
 
       /* export/import helpers */
       function download(filename,text){const blob=new Blob([text],{type:"text/plain;charset=utf-8"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=filename;a.click();URL.revokeObjectURL(url);}
-      function exportJSON(){const raw=localStorage.getItem("period3_profiles_v5")||localStorage.getItem("period3_profiles_v4")||localStorage.getItem("period3_profiles_v3")||localStorage.getItem("period3_profiles_v2")||localStorage.getItem("period3_profiles_v1");const data=raw?JSON.parse(raw):null;const payload={version:"v0.8.1",exportedAt:new Date().toISOString(),profiles:data};download(`fleurdiary_backup_${toISO(new Date())}.json`,JSON.stringify(payload,null,2));}
+      function exportJSON(){const raw=localStorage.getItem("period3_profiles_v5")||localStorage.getItem("period3_profiles_v4")||localStorage.getItem("period3_profiles_v3")||localStorage.getItem("period3_profiles_v2")||localStorage.getItem("period3_profiles_v1");const data=raw?JSON.parse(raw):null;const payload={version:"v0.8.2",exportedAt:new Date().toISOString(),profiles:data};download(`fleurdiary_backup_${toISO(new Date())}.json`,JSON.stringify(payload,null,2));}
       function exportCSV(){const raw=localStorage.getItem("period3_profiles_v5")||localStorage.getItem("period3_profiles_v4")||localStorage.getItem("period3_profiles_v3")||localStorage.getItem("period3_profiles_v2")||localStorage.getItem("period3_profiles_v1");const data=raw?JSON.parse(raw):[];const rows=[["user_id","name(label)","type","date","start","end","flags","temp","note"]];(data||[]).forEach(p=>{(p.logs.periods||[]).forEach(pr=>rows.push([p.id,p.label,"period","",pr.start||"",pr.end||"","","",""]));Object.entries(p.logs.symptoms||{}).forEach(([date,sym])=>rows.push([p.id,p.label,"symptom",date,"","",(sym.flags||[]).join("|"),sym.temp||"",String(sym.note||"").replace(/\n/g," ")]));});const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");download(`fleurdiary_export_${toISO(new Date())}.csv`,csv);}
       function importJSONFile(e){const file=e.target.files&&e.target.files[0];if(!file) return;const reader=new FileReader();reader.onload=()=>{try{const obj=JSON.parse(String(reader.result||"{}"));if(Array.isArray(obj))localStorage.setItem("period3_profiles_v5",JSON.stringify(obj));else if(obj&&Array.isArray(obj.profiles))localStorage.setItem("period3_profiles_v5",JSON.stringify(obj.profiles));else{alert("JSONの形式が違います");return;}window.location.reload();}catch{alert("読み込みに失敗しました");}};reader.readAsText(file);}
 
