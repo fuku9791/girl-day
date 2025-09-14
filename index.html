@@ -1,9 +1,8 @@
-
 <!doctype html>
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <title>3人用 生理日記録・予測</title>
+    <title>Fleur Diary</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!-- Tailwind -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -70,7 +69,7 @@
       ];
       const FLAGS=["腹痛","頭痛","だるさ","イライラ","敏感","眠い"];
 
-      /* ===== icon helpers (設定からPNGアップ→manifest更新) ===== */
+      /* ===== icon helpers（アップしたPNGをPWAに反映） ===== */
       async function fileToDataURL(file){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(file); }); }
       function resizeDataURL(dataUrl, size){
         return new Promise((resolve)=>{
@@ -104,8 +103,8 @@
         const i180 = localStorage.getItem("period3_icon_180");
         const v = String(Date.now());
         const manifestObj = {
-          name: "3人用 生理日記録・予測",
-          short_name: "生理予測3",
+          name: "Fleur Diary",
+          short_name: "FleurDiary",
           start_url: ".",
           display: "standalone",
           background_color: "#fdf2f8",
@@ -131,7 +130,7 @@
         const [active,setActive]=useState(0);
         const [calBase,setCalBase]=useState(fmt(new Date()));
         const [showSettings,setShowSettings]=useState(false);
-        const [showHistory,setShowHistory]=useState(false); // ★過去登録モーダル
+        const [showHistory,setShowHistory]=useState(false);
         const lastNotifyKeyRef=useRef("");
 
         useEffect(()=>{
@@ -203,7 +202,7 @@
 
         const recent=[...p.logs.periods].sort((a,b)=>a.start.localeCompare(b.start)).slice(-6).reverse();
 
-        // notifications (app open)
+        // notifications（アプリ起動中）
         useEffect(()=>{
           const id=setInterval(()=>{
             const now=new Date(); const key=`${toISO(new Date())}@${now.getHours()}:${now.getMinutes()}`;
@@ -255,12 +254,12 @@
         return (
           <div className="min-h-screen bg-pink-50 text-slate-900 p-4 font-sans">
             <div className="max-w-3xl mx-auto">
-              <header className="mb-4 flex items-center justify-between">
+              <header className="mb-4 flex items-center justify-between pt-10">
                 <div className="text-center w-full">
-                  <h1 className="text-3xl font-extrabold text-pink-600">🐰 3人用 生理日記録・予測</h1>
+                  <h1 className="text-3xl font-extrabold text-pink-600">🌸 Fleur Diary</h1>
                   <p className="text-xs text-pink-400">ピンク系カレンダー / 3人色分け / 前回の生理 / 過去の記録 追加対応</p>
                 </div>
-                <div className="absolute right-4 top-4 flex gap-2">
+                <div className="absolute right-4 top-6 flex gap-2">
                   <IconBtn onClick={()=>setShowHistory(true)} title="過去の記録を追加">🗓️</IconBtn>
                   <IconBtn onClick={()=>setShowSettings(true)} title="設定">⚙️</IconBtn>
                 </div>
@@ -408,7 +407,7 @@
               </div>
             )}
 
-            {/* ★過去の記録モーダル（手動追加 / まとめ登録） */}
+            {/* 過去の記録モーダル（手動追加 / まとめ登録） */}
             {showHistory && (
               <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50">
                 <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
@@ -471,8 +470,8 @@
 
       /* export/import helpers */
       function download(filename,text){const blob=new Blob([text],{type:"text/plain;charset=utf-8"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=filename;a.click();URL.revokeObjectURL(url);}
-      function exportJSON(){const raw=localStorage.getItem("period3_profiles_v5")||localStorage.getItem("period3_profiles_v4")||localStorage.getItem("period3_profiles_v3")||localStorage.getItem("period3_profiles_v2")||localStorage.getItem("period3_profiles_v1");const data=raw?JSON.parse(raw):null;const payload={version:"v0.8",exportedAt:new Date().toISOString(),profiles:data};download(`period3_backup_${toISO(new Date())}.json`,JSON.stringify(payload,null,2));}
-      function exportCSV(){const raw=localStorage.getItem("period3_profiles_v5")||localStorage.getItem("period3_profiles_v4")||localStorage.getItem("period3_profiles_v3")||localStorage.getItem("period3_profiles_v2")||localStorage.getItem("period3_profiles_v1");const data=raw?JSON.parse(raw):[];const rows=[["user_id","name(label)","type","date","start","end","flags","temp","note"]];(data||[]).forEach(p=>{(p.logs.periods||[]).forEach(pr=>rows.push([p.id,p.label,"period","",pr.start||"",pr.end||"","","",""]));Object.entries(p.logs.symptoms||{}).forEach(([date,sym])=>rows.push([p.id,p.label,"symptom",date,"","",(sym.flags||[]).join("|"),sym.temp||"",String(sym.note||"").replace(/\n/g," ")]));});const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");download(`period3_export_${toISO(new Date())}.csv`,csv);}
+      function exportJSON(){const raw=localStorage.getItem("period3_profiles_v5")||localStorage.getItem("period3_profiles_v4")||localStorage.getItem("period3_profiles_v3")||localStorage.getItem("period3_profiles_v2")||localStorage.getItem("period3_profiles_v1");const data=raw?JSON.parse(raw):null;const payload={version:"v0.8.1",exportedAt:new Date().toISOString(),profiles:data};download(`fleurdiary_backup_${toISO(new Date())}.json`,JSON.stringify(payload,null,2));}
+      function exportCSV(){const raw=localStorage.getItem("period3_profiles_v5")||localStorage.getItem("period3_profiles_v4")||localStorage.getItem("period3_profiles_v3")||localStorage.getItem("period3_profiles_v2")||localStorage.getItem("period3_profiles_v1");const data=raw?JSON.parse(raw):[];const rows=[["user_id","name(label)","type","date","start","end","flags","temp","note"]];(data||[]).forEach(p=>{(p.logs.periods||[]).forEach(pr=>rows.push([p.id,p.label,"period","",pr.start||"",pr.end||"","","",""]));Object.entries(p.logs.symptoms||{}).forEach(([date,sym])=>rows.push([p.id,p.label,"symptom",date,"","",(sym.flags||[]).join("|"),sym.temp||"",String(sym.note||"").replace(/\n/g," ")]));});const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");download(`fleurdiary_export_${toISO(new Date())}.csv`,csv);}
       function importJSONFile(e){const file=e.target.files&&e.target.files[0];if(!file) return;const reader=new FileReader();reader.onload=()=>{try{const obj=JSON.parse(String(reader.result||"{}"));if(Array.isArray(obj))localStorage.setItem("period3_profiles_v5",JSON.stringify(obj));else if(obj&&Array.isArray(obj.profiles))localStorage.setItem("period3_profiles_v5",JSON.stringify(obj.profiles));else{alert("JSONの形式が違います");return;}window.location.reload();}catch{alert("読み込みに失敗しました");}};reader.readAsText(file);}
 
       ReactDOM.createRoot(document.getElementById("root")).render(<App />);
@@ -481,7 +480,7 @@
     <!-- Service Worker（キャッシュ） -->
     <script>
       const swCode = `
-        const CACHE_NAME="period3-cache-v4";
+        const CACHE_NAME="fleur-diary-cache-v1";
         const APP_SHELL=["/","/index.html"];
         self.addEventListener("install",e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(APP_SHELL)));self.skipWaiting();});
         self.addEventListener("activate",e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.map(k=>k!==CACHE_NAME?caches.delete(k):Promise.resolve()))));self.clients.claim();});
