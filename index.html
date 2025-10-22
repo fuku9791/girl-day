@@ -21,6 +21,17 @@
 
     <style>
       html,body,#root{height:100%;}
+<style>
+  /* 既存のスタイルの下でOK */
+
+  /* モーダルをモバイルでも確実にスクロール可能にする */
+  .modal-overlay { overflow-y: auto; }
+  .modal-box {
+    max-height: 90vh;               /* 画面の9割までで切って */
+    overflow: auto;                 /* 中でスクロール */
+    -webkit-overflow-scrolling: touch; /* iOS慣性スクロール */
+  }
+</style>
 
       /* ==== 背景A（ピンクドット＋グラデ） ==== */
       @keyframes cuteGradient {0%{background-position:0 0}100%{background-position:400% 0}}
@@ -58,14 +69,6 @@
       .bg-kawaii-c .heart{
         position:absolute;bottom:-40px;opacity:.15;font-size:18px;
         animation:floatUp linear infinite;
-      }
-
-      /* ===== ここがスクロール修正パート ===== */
-      .modal-overlay { overflow-y: auto; }
-      .modal-box {
-        max-height: 90vh;
-        overflow: auto;
-        -webkit-overflow-scrolling: touch;
       }
     </style>
   </head>
@@ -207,7 +210,7 @@
         const [bg,setBg]=useState(localStorage.getItem("fleur_bg")||"a");
         const lastNotifyKeyRef=useRef("");
 
-        // 履歴編集テーブル用
+        // 履歴編集テーブル用のローカル行（編集用バッファ）
         const [editRows,setEditRows]=useState([]);
 
         // 背景適用
@@ -236,7 +239,7 @@
         },[]);
         useEffect(()=>{ localStorage.setItem("period3_profiles_v5", JSON.stringify(profiles)); },[profiles]);
 
-        // 履歴モーダル開いたら編集バッファを作成
+        // 履歴モーダルを開く/プロフ切替時に編集バッファ初期化
         useEffect(()=>{
           if(!showHistory) return;
           const arr=[...(profiles[active].logs.periods||[])].sort((a,b)=>a.start.localeCompare(b.start));
@@ -479,8 +482,8 @@
 
             {/* 設定モーダル（名前 & 通知 & 背景 & アイコン & バックアップ） */}
             {showSettings && (
-              <div className="modal-overlay fixed inset-0 bg-black/30 flex items-start justify-center p-4 z-50">
-                <div className="modal-box w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
+              <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50">
+                <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
                   <h3 className="text-lg font-bold text-pink-600 mb-3">設定</h3>
 
                   {/* 名前＆通知 */}
@@ -553,8 +556,8 @@
 
             {/* 過去の記録モーダル（手動追加 / まとめ登録 / 編集テーブル） */}
             {showHistory && (
-              <div className="modal-overlay fixed inset-0 bg-black/30 flex items-start justify-center p-4 z-50">
-                <div className="modal-box w-full max-w-3xl rounded-2xl bg-white p-5 shadow-xl">
+              <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50">
+                <div className="w-full max-w-3xl rounded-2xl bg-white p-5 shadow-xl">
                   <h3 className="text-lg font-bold text-pink-600 mb-3">過去の生理（{profiles[active].label}）</h3>
 
                   <div className="grid md:grid-cols-2 gap-6">
@@ -608,9 +611,7 @@
                     <div className="md:col-span-1">
                       <div className="font-semibold text-sm mb-2">既存の記録を編集 / 削除</div>
                       <div className="text-[11px] opacity-60 mb-2">日付を直して「変更を保存」。終了日を空欄にすると「未終了」扱いにできます。</div>
-
-                      <!-- ここが画面依存の高さでスクロール -->
-                      <div className="max-h-[55vh] overflow-auto border rounded-xl">
+                      <div className="max-h-[340px] overflow-auto border rounded-xl">
                         <table className="w-full text-sm">
                           <thead className="bg-pink-50 sticky top-0">
                             <tr>
@@ -657,6 +658,7 @@
                         <button className="rounded-full px-4 py-2 border" onClick={()=>setShowHistory(false)}>閉じる</button>
                         <button className="rounded-full px-4 py-2 bg-pink-500 text-white shadow"
                           onClick={()=>{
+                            // 検証：開始必須、終了は空or開始以上
                             for(const r of editRows){
                               if(!r.start){ alert("開始日は必須です"); return; }
                               if(r.end){
@@ -664,6 +666,7 @@
                                 if(s>e){ alert(`終了日は開始日以降にしてください\n(${r.start} → ${r.end})`); return; }
                               }
                             }
+                            // 反映
                             setProfiles(prev=>{
                               const c=JSON.parse(JSON.stringify(prev));
                               const arr=editRows.map(r=>({
@@ -689,7 +692,7 @@
 
       /* export/import helpers */
       function download(filename,text){const blob=new Blob([text],{type:"text/plain;charset=utf-8"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=filename;a.click();URL.revokeObjectURL(url);}
-      function exportJSON(){const raw=localStorage.getItem("period3_profiles_v5")||localStorage.getItem("period3_profiles_v4")||localStorage.getItem("period3_profiles_v3")||localStorage.getItem("period3_profiles_v2")||localStorage.getItem("period3_profiles_v1");const data=raw?JSON.parse(raw):null;const payload={version:"v0.10.1",exportedAt:new Date().toISOString(),profiles:data};download(`fleurdiary_backup_${toISO(new Date())}.json`,JSON.stringify(payload,null,2));}
+      function exportJSON(){const raw=localStorage.getItem("period3_profiles_v5")||localStorage.getItem("period3_profiles_v4")||localStorage.getItem("period3_profiles_v3")||localStorage.getItem("period3_profiles_v2")||localStorage.getItem("period3_profiles_v1");const data=raw?JSON.parse(raw):null;const payload={version:"v0.10",exportedAt:new Date().toISOString(),profiles:data};download(`fleurdiary_backup_${toISO(new Date())}.json`,JSON.stringify(payload,null,2));}
       function exportCSV(){const raw=localStorage.getItem("period3_profiles_v5")||localStorage.getItem("period3_profiles_v4")||localStorage.getItem("period3_profiles_v3")||localStorage.getItem("period3_profiles_v2")||localStorage.getItem("period3_profiles_v1");const data=raw?JSON.parse(raw):[];const rows=[["user_id","name(label)","type","date","start","end","flags","temp","note"]];(data||[]).forEach(p=>{(p.logs.periods||[]).forEach(pr=>rows.push([p.id,p.label,"period","",pr.start||"",pr.end||"","","",""]));Object.entries(p.logs.symptoms||{}).forEach(([date,sym])=>rows.push([p.id,p.label,"symptom",date,"","",(sym.flags||[]).join("|"),sym.temp||"",String(sym.note||"").replace(/\n/g," ")]));});const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");download(`fleurdiary_export_${toISO(new Date())}.csv`,csv);}
       function importJSONFile(e){const file=e.target.files&&e.target.files[0];if(!file) return;const reader=new FileReader();reader.onload=()=>{try{const obj=JSON.parse(String(reader.result||"{}"));if(Array.isArray(obj))localStorage.setItem("period3_profiles_v5",JSON.stringify(obj));else if(obj&&Array.isArray(obj.profiles))localStorage.setItem("period3_profiles_v5",JSON.stringify(obj.profiles));else{alert("JSONの形式が違います");return;}window.location.reload();}catch{alert("読み込みに失敗しました");}};reader.readAsText(file);}
 
