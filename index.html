@@ -106,24 +106,19 @@
         return clamp(Math.round(spans.reduce((s,v)=>s+v,0)/spans.length),2,10);
       }
 
-      /* === 3段バンド用（ここを “必ず” util群のあとに置く） === */
+      /* === 3段バンド用 === */
       function withAlpha(hex, a){
         const h=hex.replace("#",""); const n=parseInt(h,16);
         const r=(n>>16)&255, g=(n>>8)&255, b=n&255;
         return `rgba(${r}, ${g}, ${b}, ${a})`;
       }
-      // プロフごとの、その日が「実績」or「予測」かを判定して色を返す
       function bandStyleFor(prof, iso){
-        // 実績（開始〜終了、または開始して終了未入力の日）
         const actual = (prof.logs.periods||[]).some(pr=>{
           if(!pr.start) return false;
           if(pr.end)  return iso>=pr.start && iso<=pr.end;
-          return iso===pr.start; // 開始だけの日はその日の実績扱い
+          return iso===pr.start;
         });
-        if(actual){
-          return { backgroundColor: withAlpha(prof.color, 0.55) };
-        }
-        // 予測（最後の開始日＋平均周期〜平均出血日数ぶん）
+        if(actual){ return { backgroundColor: withAlpha(prof.color, 0.55) }; }
         const starts=[...(prof.logs.periods||[])].map(x=>x.start).filter(Boolean).sort();
         if(starts.length){
           const cycle=calcCycleAvgWeighted(starts);
@@ -131,11 +126,9 @@
           const lastStart=starts[starts.length-1];
           const nxStart=addDays(lastStart,cycle);
           const nxEnd=addDays(nxStart, bleed-1);
-          if(iso>=nxStart && iso<=nxEnd){
-            return { backgroundColor: withAlpha(prof.color, 0.22) };
-          }
+          if(iso>=nxStart && iso<=nxEnd){ return { backgroundColor: withAlpha(prof.color, 0.22) }; }
         }
-        return {}; // 何もなし
+        return {};
       }
 
       /* ===== data ===== */
@@ -206,6 +199,9 @@
         const [bg,setBg]=useState(localStorage.getItem("fleur_bg")||"a");
         const lastNotifyKeyRef=useRef("");
 
+        // 履歴編集テーブル用のローカル行（編集用バッファ）
+        const [editRows,setEditRows]=useState([]);
+
         // 背景適用
         useEffect(()=>{
           const el=document.getElementById("bgDecor");
@@ -231,6 +227,13 @@
           applyManifestIcons();
         },[]);
         useEffect(()=>{ localStorage.setItem("period3_profiles_v5", JSON.stringify(profiles)); },[profiles]);
+
+        // 履歴モーダルを開く/プロフ切替時に編集バッファ初期化
+        useEffect(()=>{
+          if(!showHistory) return;
+          const arr=[...(profiles[active].logs.periods||[])].sort((a,b)=>a.start.localeCompare(b.start));
+          setEditRows(arr.map(pr=>({start:pr.start, end:pr.end||"", _origStart:pr.start, _origEnd:pr.end||""})));
+        },[showHistory, active, profiles]);
 
         const p=profiles[active];
         const starts=useMemo(()=>[...p.logs.periods].map(x=>x.start).sort(),[p.logs.periods]);
@@ -329,10 +332,10 @@
               <header className="mb-4 flex items-center justify-between pt-10">
                 <div className="text-center w-full">
                   <h1 className="text-3xl font-extrabold text-pink-600">🌸 Fleur Diary</h1>
-                  <p className="text-xs text-pink-400">ピンク系カレンダー / 3人色分け / 3段バンド表示 / 過去登録 / 通知 / PWA</p>
+                  <p className="text-xs text-pink-400">3人管理 / 3段カレンダー / 過去編集 / 背景切替 / 通知 / PWA</p>
                 </div>
                 <div className="absolute right-4 top-6 flex gap-2">
-                  <button onClick={()=>setShowHistory(true)} title="過去の記録を追加" className="rounded-full bg-white/70 hover:bg-white px-3 py-2 shadow border">🗓️</button>
+                  <button onClick={()=>setShowHistory(true)} title="過去の記録を追加・編集" className="rounded-full bg-white/70 hover:bg-white px-3 py-2 shadow border">🗓️</button>
                   <button onClick={()=>setShowSettings(true)} title="設定" className="rounded-full bg-white/70 hover:bg-white px-3 py-2 shadow border">⚙️</button>
                 </div>
               </header>
@@ -540,61 +543,135 @@
               </div>
             )}
 
-            {/* 過去の記録モーダル（手動追加 / まとめ登録） */}
+            {/* 過去の記録モーダル（手動追加 / まとめ登録 / 編集テーブル） */}
             {showHistory && (
               <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50">
-                <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
-                  <h3 className="text-lg font-bold text-pink-600 mb-3">過去の生理を追加（{profiles[active].label}）</h3>
+                <div className="w-full max-w-3xl rounded-2xl bg-white p-5 shadow-xl">
+                  <h3 className="text-lg font-bold text-pink-600 mb-3">過去の生理（{profiles[active].label}）</h3>
 
-                  {/* 手動追加 */}
-                  <div className="mb-4">
-                    <div className="font-semibold text-sm mb-2">1件ずつ追加</div>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-center">
-                      <input id="hist-start" type="date" className="rounded-xl border px-3 py-2 shadow-sm" />
-                      <span className="text-center text-sm">〜</span>
-                      <input id="hist-end" type="date" className="rounded-xl border px-3 py-2 shadow-sm" />
-                    </div>
-                    <div className="text-[11px] opacity-60 mt-1">※ 終了日は空でもOK（未終了として登録）</div>
-                    <div className="mt-2 text-right">
-                      <button className="rounded-full bg-pink-500 text-white px-4 py-2 shadow"
-                        onClick={()=>{
-                          const s=document.getElementById("hist-start").value;
-                          const e=document.getElementById("hist-end").value;
-                          if(!s){ alert("開始日を入れてね"); return; }
-                          addPeriod(active, s, e||null);
-                          document.getElementById("hist-start").value="";
-                          document.getElementById("hist-end").value="";
-                          alert("追加しました！");
-                        }}>追加する</button>
-                    </div>
-                  </div>
+                  <div className="grid md:grid-cols-2 gap-6">
+                    {/* 手動追加 */}
+                    <div>
+                      <div className="font-semibold text-sm mb-2">1件ずつ追加</div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-center">
+                        <input id="hist-start" type="date" className="rounded-xl border px-3 py-2 shadow-sm" />
+                        <span className="text-center text-sm">〜</span>
+                        <input id="hist-end" type="date" className="rounded-xl border px-3 py-2 shadow-sm" />
+                      </div>
+                      <div className="text-[11px] opacity-60 mt-1">※ 終了日は空でもOK（未終了として登録）</div>
+                      <div className="mt-2 text-right">
+                        <button className="rounded-full bg-pink-500 text-white px-4 py-2 shadow"
+                          onClick={()=>{
+                            const s=document.getElementById("hist-start").value;
+                            const e=document.getElementById("hist-end").value;
+                            if(!s){ alert("開始日を入れてね"); return; }
+                            addPeriod(active, s, e||null);
+                            document.getElementById("hist-start").value="";
+                            document.getElementById("hist-end").value="";
+                            alert("追加しました！");
+                          }}>追加する</button>
+                      </div>
 
-                  <hr className="my-4"/>
+                      <hr className="my-4"/>
 
-                  {/* まとめ登録 */}
-                  <div className="mb-3">
-                    <div className="font-semibold text-sm mb-2">まとめ登録（コピペ）</div>
-                    <textarea id="hist-bulk" rows="6" className="w-full rounded-xl border px-3 py-2 shadow-sm" placeholder={`例:
+                      {/* まとめ登録 */}
+                      <div className="mb-3">
+                        <div className="font-semibold text-sm mb-2">まとめ登録（コピペ）</div>
+                        <textarea id="hist-bulk" rows="6" className="w-full rounded-xl border px-3 py-2 shadow-sm" placeholder={`例:
 2024/05/01,2024/05/05
 2024/03/29,2024/04/02
 2024-02-26 2024-03-02`}></textarea>
-                    <div className="text-[11px] opacity-60 mt-1">
-                      1行1件、<code>開始日,終了日</code>（区切りはカンマ/タブ/スペースOK）／日付は <code>YYYY-MM-DD</code> / <code>YYYY/MM/DD</code> / <code>YYYY.MM.DD</code> などOK
+                        <div className="text-[11px] opacity-60 mt-1">
+                          1行1件、<code>開始日,終了日</code>（区切りはカンマ/タブ/スペースOK）／日付は <code>YYYY-MM-DD</code> / <code>YYYY/MM/DD</code> / <code>YYYY.MM.DD</code> などOK
+                        </div>
+                        <div className="mt-2 text-right">
+                          <button className="rounded-full bg-pink-500 text-white px-4 py-2 shadow"
+                            onClick={()=>{
+                              const txt=document.getElementById("hist-bulk").value;
+                              const {ok,ng}=bulkAdd(active, txt);
+                              alert(`登録: ${ok}件 / スキップ: ${ng}件`);
+                              document.getElementById("hist-bulk").value="";
+                            }}>まとめて登録</button>
+                        </div>
+                      </div>
                     </div>
-                    <div className="mt-2 text-right">
-                      <button className="rounded-full bg-pink-500 text-white px-4 py-2 shadow"
-                        onClick={()=>{
-                          const txt=document.getElementById("hist-bulk").value;
-                          const {ok,ng}=bulkAdd(active, txt);
-                          alert(`登録: ${ok}件 / スキップ: ${ng}件`);
-                          document.getElementById("hist-bulk").value="";
-                        }}>まとめて登録</button>
+
+                    {/* 編集テーブル */}
+                    <div className="md:col-span-1">
+                      <div className="font-semibold text-sm mb-2">既存の記録を編集 / 削除</div>
+                      <div className="text-[11px] opacity-60 mb-2">日付を直して「変更を保存」。終了日を空欄にすると「未終了」扱いにできます。</div>
+                      <div className="max-h-[340px] overflow-auto border rounded-xl">
+                        <table className="w-full text-sm">
+                          <thead className="bg-pink-50 sticky top-0">
+                            <tr>
+                              <th className="p-2 text-left">開始</th>
+                              <th className="p-2 text-left">終了</th>
+                              <th className="p-2"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {editRows.length===0 && (
+                              <tr><td className="p-3 text-slate-400" colSpan="3">記録がありません</td></tr>
+                            )}
+                            {editRows.map((row,idx)=>(
+                              <tr key={row._origStart+"|"+row._origEnd} className="border-t">
+                                <td className="p-2">
+                                  <input type="date" value={row.start} onChange={(e)=>{
+                                    const v=e.target.value; setEditRows(prev=>prev.map((r,i)=>i===idx?{...r,start:v}:r));
+                                  }} className="rounded border px-2 py-1 w-full"/>
+                                </td>
+                                <td className="p-2">
+                                  <div className="flex gap-2 items-center">
+                                    <input type="date" value={row.end} onChange={(e)=>{
+                                      const v=e.target.value; setEditRows(prev=>prev.map((r,i)=>i===idx?{...r,end:v}:r));
+                                    }} className="rounded border px-2 py-1 w-full"/>
+                                    <button title="未終了にする" className="text-xs px-2 py-1 border rounded" onClick={()=>{
+                                      setEditRows(prev=>prev.map((r,i)=>i===idx?{...r,end:""}:r));
+                                    }}>未終了</button>
+                                  </div>
+                                </td>
+                                <td className="p-2 text-right">
+                                  <button title="削除" className="px-2 py-1 rounded bg-white border shadow-sm"
+                                    onClick={()=>{
+                                      if(!confirm("この記録を削除しますか？")) return;
+                                      setEditRows(prev=>prev.filter((_,i)=>i!==idx));
+                                    }}>🗑️</button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="flex justify-end gap-2 mt-3">
+                        <button className="rounded-full px-4 py-2 border" onClick={()=>setShowHistory(false)}>閉じる</button>
+                        <button className="rounded-full px-4 py-2 bg-pink-500 text-white shadow"
+                          onClick={()=>{
+                            // 検証：開始必須、終了は空or開始以上
+                            for(const r of editRows){
+                              if(!r.start){ alert("開始日は必須です"); return; }
+                              if(r.end){
+                                const s=parseFlexDate(r.start)||r.start, e=parseFlexDate(r.end)||r.end;
+                                if(s>e){ alert(`終了日は開始日以降にしてください\n(${r.start} → ${r.end})`); return; }
+                              }
+                            }
+                            // 反映
+                            setProfiles(prev=>{
+                              const c=JSON.parse(JSON.stringify(prev));
+                              const arr=editRows.map(r=>({
+                                start: parseFlexDate(r.start)||r.start,
+                                end: r.end? (parseFlexDate(r.end)||r.end) : null
+                              }));
+                              arr.sort((a,b)=>a.start.localeCompare(b.start));
+                              c[active].logs.periods=arr;
+                              return c;
+                            });
+                            alert("変更を保存しました！");
+                          }}>変更を保存</button>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="flex gap-2 justify-end mt-2">
-                    <button onClick={()=>setShowHistory(false)} className="rounded-full px-4 py-2 border">閉じる</button>
-                  </div>
                 </div>
               </div>
             )}
@@ -604,7 +681,7 @@
 
       /* export/import helpers */
       function download(filename,text){const blob=new Blob([text],{type:"text/plain;charset=utf-8"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=filename;a.click();URL.revokeObjectURL(url);}
-      function exportJSON(){const raw=localStorage.getItem("period3_profiles_v5")||localStorage.getItem("period3_profiles_v4")||localStorage.getItem("period3_profiles_v3")||localStorage.getItem("period3_profiles_v2")||localStorage.getItem("period3_profiles_v1");const data=raw?JSON.parse(raw):null;const payload={version:"v0.9",exportedAt:new Date().toISOString(),profiles:data};download(`fleurdiary_backup_${toISO(new Date())}.json`,JSON.stringify(payload,null,2));}
+      function exportJSON(){const raw=localStorage.getItem("period3_profiles_v5")||localStorage.getItem("period3_profiles_v4")||localStorage.getItem("period3_profiles_v3")||localStorage.getItem("period3_profiles_v2")||localStorage.getItem("period3_profiles_v1");const data=raw?JSON.parse(raw):null;const payload={version:"v0.10",exportedAt:new Date().toISOString(),profiles:data};download(`fleurdiary_backup_${toISO(new Date())}.json`,JSON.stringify(payload,null,2));}
       function exportCSV(){const raw=localStorage.getItem("period3_profiles_v5")||localStorage.getItem("period3_profiles_v4")||localStorage.getItem("period3_profiles_v3")||localStorage.getItem("period3_profiles_v2")||localStorage.getItem("period3_profiles_v1");const data=raw?JSON.parse(raw):[];const rows=[["user_id","name(label)","type","date","start","end","flags","temp","note"]];(data||[]).forEach(p=>{(p.logs.periods||[]).forEach(pr=>rows.push([p.id,p.label,"period","",pr.start||"",pr.end||"","","",""]));Object.entries(p.logs.symptoms||{}).forEach(([date,sym])=>rows.push([p.id,p.label,"symptom",date,"","",(sym.flags||[]).join("|"),sym.temp||"",String(sym.note||"").replace(/\n/g," ")]));});const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");download(`fleurdiary_export_${toISO(new Date())}.csv`,csv);}
       function importJSONFile(e){const file=e.target.files&&e.target.files[0];if(!file) return;const reader=new FileReader();reader.onload=()=>{try{const obj=JSON.parse(String(reader.result||"{}"));if(Array.isArray(obj))localStorage.setItem("period3_profiles_v5",JSON.stringify(obj));else if(obj&&Array.isArray(obj.profiles))localStorage.setItem("period3_profiles_v5",JSON.stringify(obj.profiles));else{alert("JSONの形式が違います");return;}window.location.reload();}catch{alert("読み込みに失敗しました");}};reader.readAsText(file);}
 
